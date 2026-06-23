@@ -1,9 +1,8 @@
-const express = require('express');
-const cors = require('cors');
-const jwt = require('jsonwebtoken');
-const cookieParser = require('cookie-parser');
-require('dotenv').config();
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const express = require("express");
+const cors = require("cors");
+require("dotenv").config();
+// ১. ObjectId ইমপোর্ট করা হলো
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -11,31 +10,13 @@ const port = process.env.PORT || 5000;
 // ==========================================
 // Middlewares
 // ==========================================
-app.use(cors({
-  origin: ['http://localhost:3000'], // আপনার ফ্রন্টএন্ডের লোকালহোস্ট লিংক
-  credentials: true // কুকি আদান-প্রদানের জন্য এটি বাধ্যতামুলক
-}));
+app.use(
+  cors({
+    origin: ["http://localhost:3000"],
+  })
+);
+
 app.use(express.json());
-app.use(cookieParser()); // কুকি পড়ার জন্য
-
-// ==========================================
-// Custom Middleware: Token Verification
-// ==========================================
-const verifyToken = (req, res, next) => {
-  const token = req.cookies?.token;
-  
-  if (!token) {
-    return res.status(401).send({ message: 'Unauthorized access' });
-  }
-
-  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
-    if (err) {
-      return res.status(401).send({ message: 'Unauthorized access' });
-    }
-    req.user = decoded; // টোকেন সঠিক হলে ইউজারের তথ্য রিকোয়েস্টে সেভ করে দিলাম
-    next(); // গার্ড পাস করে ভেতরে যাওয়ার অনুমতি দিলাম
-  });
-};
 
 // ==========================================
 // MongoDB Connection
@@ -47,123 +28,189 @@ const client = new MongoClient(uri, {
     version: ServerApiVersion.v1,
     strict: true,
     deprecationErrors: true,
-  }
+  },
 });
 
 async function run() {
   try {
-    // Connect to the database
-    // await client.connect(); // (ঐচ্ছিক: Vercel-এ ডেপ্লয় করার সময় এটি কমেন্ট আউট রাখতে হয়)
-    
-    const db = client.db("BiblioDrop");
+    const db = client.db("bibliodrop");
+
     const booksCollection = db.collection("books");
-    const usersCollection = db.collection("users"); // ভবিষ্যতের জন্য
-    const deliveriesCollection = db.collection("deliveries"); // ভবিষ্যতের জন্য
+    const usersCollection = db.collection("users");
+    const deliveriesCollection = db.collection("deliveries");
 
     // ==========================================
-    // Auth & JWT APIs
-    // ==========================================
-    
-    // ১. টোকেন তৈরি করা (লগিন করার সময় কল হবে)
-    app.post('/jwt', async (req, res) => {
-      const user = req.body;
-      const token = jwt.sign(user, process.env.JWT_SECRET, { expiresIn: '1d' });
-
-      res.cookie('token', token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
-      }).send({ success: true });
-    });
-
-    // ২. টোকেন ক্লিয়ার করা (লগআউট করার সময় কল হবে)
-    app.post('/logout', async (req, res) => {
-      res.clearCookie('token', {
-        maxAge: 0,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'strict',
-      }).send({ success: true });
-    });
-
-    // ==========================================
-    // Books APIs
+    // Books APIs (সবগুলো API এই ফাংশনের ভেতরে থাকবে)
     // ==========================================
 
-    // ৩. নতুন বই আপলোড করা (Protected)
-    app.post('/books', verifyToken, async (req, res) => {
+    // Add Book
+    app.post("/books", async (req, res) => {
       try {
         const bookData = req.body;
+        console.log("Frontend থেকে এই ডাটা এসেছে: ", bookData);
+        
         const newBook = {
           ...bookData,
-          status: "Pending Approval", // ডিফল্ট স্ট্যাটাস
-          createdAt: new Date()
+          status: "Pending Approval",
+          createdAt: new Date(),
         };
 
         const result = await booksCollection.insertOne(newBook);
-        res.status(201).send({ success: true, message: "Book added successfully!", data: result });
+
+        res.status(201).send({
+          success: true,
+          message: "Book added successfully!",
+          data: result,
+        });
       } catch (error) {
         console.error("Error adding book:", error);
-        res.status(500).send({ error: "Failed to add book" });
+        res.status(500).send({
+          success: false,
+          error: "Failed to add book",
+        });
       }
     });
 
-    // ৪. পাবলিশড হওয়া সব বই দেখা (Public - Home & Browse Page)
-    app.get('/books', async (req, res) => {
+    // Get Published Books (With Pagination)
+    app.get("/books", async (req, res) => {
       try {
+        const page = parseInt(req.query.page) || 0;
+        const size = parseInt(req.query.size) || 6;
+
         const query = { status: "Published" };
-        const books = await booksCollection.find(query).toArray();
-        res.send({ success: true, data: books });
+
+        const totalBooks = await booksCollection.countDocuments(query);
+
+        const books = await booksCollection
+          .find(query)
+          .skip(page * size)
+          .limit(size)
+          .toArray();
+
+        res.send({
+          success: true,
+          totalBooks, 
+          data: books,
+        });
       } catch (error) {
-        console.error("Error fetching published books:", error);
-        res.status(500).send({ error: "Failed to fetch books" });
+        console.error("Error fetching books:", error);
+        res.status(500).send({
+          success: false,
+          error: "Failed to fetch books",
+        });
       }
     });
 
-    // ৫. লাইব্রেরিয়ানের নিজের আপলোড করা বই দেখা (Protected)
-    app.get('/books/librarian/:email', verifyToken, async (req, res) => {
+    // Get Librarian Books
+    app.get("/books/librarian/:email", async (req, res) => {
       try {
         const email = req.params.email;
-        
-        // সিকিউরিটি: অন্য কেউ যেন অন্যের বই দেখতে না পারে
-        if (req.user.email !== email) {
-          return res.status(403).send({ message: 'Forbidden access' });
-        }
 
-        const query = { librarianEmail: email }; 
-        const books = await booksCollection.find(query).toArray();
-        res.send({ success: true, data: books });
+        const books = await booksCollection
+          .find({ librarianEmail: email })
+          .toArray();
+
+        res.send({
+          success: true,
+          data: books,
+        });
       } catch (error) {
         console.error("Error fetching librarian books:", error);
-        res.status(500).send({ error: "Failed to fetch librarian books" });
+        res.status(500).send({
+          success: false,
+          error: "Failed to fetch librarian books",
+        });
       }
     });
 
-    // ৬. অ্যাডমিনের জন্য সব বই দেখা (Protected)
-    app.get('/books/admin/all', verifyToken, async (req, res) => {
+    // Get All Books (Admin)
+    app.get("/books/admin/all", async (req, res) => {
       try {
         const books = await booksCollection.find().toArray();
-        res.send({ success: true, data: books });
+
+        res.send({
+          success: true,
+          data: books,
+        });
       } catch (error) {
-        console.error("Error fetching all books for admin:", error);
-        res.status(500).send({ error: "Failed to fetch all books" });
+        console.error("Error fetching all books:", error);
+        res.status(500).send({
+          success: false,
+          error: "Failed to fetch all books",
+        });
       }
     });
 
-    // Send a ping to confirm a successful connection
-    // await client.db("admin").command({ ping: 1 });
+    // ২. Pending Books API (এটি উপরে রাখা হলো)
+    app.get("/books/admin/pending", async (req, res) => {
+      try {
+        const pendingBooks = await booksCollection.find({ status: "Pending Approval" }).toArray();
+        res.send({ success: true, data: pendingBooks });
+      } catch (error) {
+        res.status(500).send({ success: false, error: "Failed to fetch pending books" });
+      }
+    });
+
+    // Get Single Book by ID
+    app.get("/books/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) }; 
+        const book = await booksCollection.findOne(query);
+
+        if (!book) {
+          return res.status(404).send({ success: false, message: "Book not found" });
+        }
+
+        res.send({
+          success: true,
+          data: book,
+        });
+      } catch (error) {
+        console.error("Error fetching single book:", error);
+        res.status(500).send({
+          success: false,
+          error: "Failed to fetch book",
+        });
+      }
+    });
+
+    // Update Book Status
+    app.patch("/books/status/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const { status } = req.body; 
+
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: { status: status },
+        };
+
+        const result = await booksCollection.updateOne(filter, updateDoc);
+
+        res.send({
+          success: true,
+          message: `Book status updated to ${status}`,
+          data: result,
+        });
+      } catch (error) {
+        console.error("Error updating status:", error);
+        res.status(500).send({ success: false, error: "Failed to update status" });
+      }
+    });
+
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
-    
   } finally {
-    // await client.close(); 
   }
 }
+
 run().catch(console.dir);
 
-// Root API
-app.get('/', (req, res) => {
-  res.send('BiblioDrop Server is running securely!')
+// Root Route (এটি run ফাংশনের বাইরেই থাকবে)
+app.get("/", (req, res) => {
+  res.send("BiblioDrop Server is running!");
 });
 
 app.listen(port, () => {
-  console.log(`Server listening on port ${port}`)
+  console.log(`Server listening on port ${port}`);
 });
