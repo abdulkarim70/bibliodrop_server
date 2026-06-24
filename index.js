@@ -40,10 +40,10 @@ async function run() {
     const deliveriesCollection = db.collection("deliveries");
 
     // ==========================================
-    
+    // Books APIs
     // ==========================================
 
-    // Add Book
+    // 1. Add Book
     app.post("/books", async (req, res) => {
       try {
         const bookData = req.body;
@@ -71,7 +71,7 @@ async function run() {
       }
     });
 
-    // Get Published Books (With Pagination)
+    // 2. Get Published Books (With Pagination)
     app.get("/books", async (req, res) => {
       try {
         const page = parseInt(req.query.page) || 0;
@@ -101,7 +101,7 @@ async function run() {
       }
     });
 
-    // Get Librarian Books
+    // 3. Get Librarian Books
     app.get("/books/librarian/:email", async (req, res) => {
       try {
         const email = req.params.email;
@@ -123,7 +123,7 @@ async function run() {
       }
     });
 
-    // Get All Books (Admin)
+    // 4. Get All Books (Admin)
     app.get("/books/admin/all", async (req, res) => {
       try {
         const books = await booksCollection.find().toArray();
@@ -141,6 +141,7 @@ async function run() {
       }
     });
 
+    // 5. Get Pending Books (Admin)
     app.get("/books/admin/pending", async (req, res) => {
       try {
         const pendingBooks = await booksCollection.find({ status: "Pending Approval" }).toArray();
@@ -150,7 +151,7 @@ async function run() {
       }
     });
 
-    // Get Single Book by ID
+    // 6. Get Single Book by ID (অবশ্যই pending রাউটের নিচে থাকতে হবে)
     app.get("/books/:id", async (req, res) => {
       try {
         const id = req.params.id;
@@ -174,7 +175,7 @@ async function run() {
       }
     });
 
-    // Update Book Status
+    // 7. Update Book Status (Publish, Unpublish, Checked Out)
     app.patch("/books/status/:id", async (req, res) => {
       try {
         const id = req.params.id;
@@ -198,6 +199,55 @@ async function run() {
       }
     });
 
+    // 8. Edit / Update Book Details (Librarian)
+    app.patch("/books/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const updatedData = req.body;
+        const filter = { _id: new ObjectId(id) };
+        
+        const updateDoc = {
+          $set: {
+            title: updatedData.title,
+            author: updatedData.author,
+            category: updatedData.category,
+            deliveryFee: updatedData.deliveryFee,
+            description: updatedData.description,
+            ...(updatedData.image && { image: updatedData.image })
+          },
+        };
+
+        const result = await booksCollection.updateOne(filter, updateDoc);
+
+        res.send({
+          success: true,
+          message: "Book updated successfully!",
+          data: result,
+        });
+      } catch (error) {
+        console.error("Error updating book:", error);
+        res.status(500).send({ success: false, error: "Failed to update book details" });
+      }
+    });
+
+    // 9. Delete Book (Librarian & Admin)
+    app.delete("/books/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const result = await booksCollection.deleteOne(query);
+
+        res.send({
+          success: true,
+          message: "Book deleted successfully!",
+          data: result,
+        });
+      } catch (error) {
+        console.error("Error deleting book:", error);
+        res.status(500).send({ success: false, error: "Failed to delete book" });
+      }
+    });
+
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
   } finally {
   }
@@ -205,7 +255,9 @@ async function run() {
 
 run().catch(console.dir);
 
-
+// ==========================================
+// Root Route
+// ==========================================
 app.get("/", (req, res) => {
   res.send("BiblioDrop Server is running!");
 });
