@@ -3,8 +3,7 @@ const cors = require("cors");
 require("dotenv").config();
 
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
-
-const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY); //stripe
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY); // Stripe
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -153,7 +152,7 @@ async function run() {
       }
     });
 
-    // 6. Get Single Book by ID (অবশ্যই pending রাউটের নিচে থাকতে হবে)
+    // 6. Get Single Book by ID
     app.get("/books/:id", async (req, res) => {
       try {
         const id = req.params.id;
@@ -177,7 +176,7 @@ async function run() {
       }
     });
 
-    // 7. Update Book Status (Publish, Unpublish, Checked Out)
+    // 7. Update Book Status
     app.patch("/books/status/:id", async (req, res) => {
       try {
         const id = req.params.id;
@@ -198,59 +197,6 @@ async function run() {
       } catch (error) {
         console.error("Error updating status:", error);
         res.status(500).send({ success: false, error: "Failed to update status" });
-      }
-    });
-
-
-    // ==========================================
-    // Stripe Payment Intent API
-    // ==========================================
-    app.post("/create-payment-intent", async (req, res) => {
-      try {
-        const { deliveryFee } = req.body;
-        
-        // Stripe টাকার হিসাব সেন্ট (cents/পয়সা) এ করে। তাই ডলারকে 100 দিয়ে গুণ করতে হবে।
-        const amount = parseInt(deliveryFee * 100);
-
-        // Payment Intent তৈরি করা
-        const paymentIntent = await stripe.paymentIntents.create({
-          amount: amount,
-          currency: "usd",
-          payment_method_types: ["card"],
-        });
-
-        res.send({
-          success: true,
-          clientSecret: paymentIntent.client_secret,
-        });
-      } catch (error) {
-        console.error("Stripe Intent Error:", error);
-        res.status(500).send({ success: false, error: "Payment failed to initialize" });
-      }
-    });
-
-    // ==========================================
-    // Save Delivery Record API
-    // ==========================================
-    app.post("/deliveries", async (req, res) => {
-      try {
-        const deliveryData = req.body;
-        
-        // deliveries কালেকশনে ডেটা সেভ করা
-        const result = await deliveriesCollection.insertOne({
-          ...deliveryData,
-          status: "Pending Delivery", // প্রাথমিক স্ট্যাটাস
-          createdAt: new Date()
-        });
-
-        // একইসাথে বইয়ের স্ট্যাটাস আপডেট করে "Checked Out" করে দেওয়া
-        const filter = { _id: new ObjectId(deliveryData.bookId) };
-        const updateDoc = { $set: { status: "Checked Out" } };
-        await booksCollection.updateOne(filter, updateDoc);
-
-        res.send({ success: true, result });
-      } catch (error) {
-        res.status(500).send({ success: false, error: "Failed to save delivery record" });
       }
     });
 
@@ -285,7 +231,7 @@ async function run() {
       }
     });
 
-    // 9. Delete Book (Librarian & Admin)
+    // 9. Delete Book
     app.delete("/books/:id", async (req, res) => {
       try {
         const id = req.params.id;
@@ -303,17 +249,85 @@ async function run() {
       }
     });
 
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
-  } finally {
-  }
-}
-
-run().catch(console.dir);
-
-
-// ==========================================
-    // Get Specific User's Deliveries
     // ==========================================
+    // Stripe Payment Intent API
+    // ==========================================
+    app.post("/create-payment-intent", async (req, res) => {
+      try {
+        const { deliveryFee } = req.body;
+        const amount = parseInt(deliveryFee * 100);
+
+        const paymentIntent = await stripe.paymentIntents.create({
+          amount: amount,
+          currency: "usd",
+          payment_method_types: ["card"],
+        });
+
+        res.send({
+          success: true,
+          clientSecret: paymentIntent.client_secret,
+        });
+      } catch (error) {
+        console.error("Stripe Intent Error:", error);
+        res.status(500).send({ success: false, error: "Payment failed to initialize" });
+      }
+    });
+
+    // ==========================================
+    // Deliveries APIs
+    // ==========================================
+
+    // Save Delivery Record API
+    app.post("/deliveries", async (req, res) => {
+      try {
+        const deliveryData = req.body;
+        
+        const result = await deliveriesCollection.insertOne({
+          ...deliveryData,
+          status: "Pending Delivery",
+          createdAt: new Date()
+        });
+
+        const filter = { _id: new ObjectId(deliveryData.bookId) };
+        const updateDoc = { $set: { status: "Checked Out" } };
+        await booksCollection.updateOne(filter, updateDoc);
+
+        res.send({ success: true, result });
+      } catch (error) {
+        res.status(500).send({ success: false, error: "Failed to save delivery record" });
+      }
+    });
+    // ==========================================
+    // Reviews APIs
+    // ==========================================
+
+    // ১. নির্দিষ্ট কোনো বইয়ের জন্য রিভিউ পোস্ট করা
+    app.post("/reviews", async (req, res) => {
+      try {
+        const reviewData = req.body;
+        const result = await db.collection("reviews").insertOne({
+          ...reviewData,
+          createdAt: new Date()
+        });
+        res.status(201).send({ success: true, data: result });
+      } catch (error) {
+        res.status(500).send({ success: false, error: "Failed to add review" });
+      }
+    });
+
+    // ২. নির্দিষ্ট ইউজারের দেওয়া সমস্ত রিভিউ তুলে আনা (My Reviews এর জন্য)
+    app.get("/reviews/user/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        const reviews = await db.collection("reviews").find({ userEmail: email }).toArray();
+        res.send({ success: true, data: reviews });
+      } catch (error) {
+        console.error("Error fetching user reviews:", error);
+        res.status(500).send({ success: false, error: "Failed to fetch reviews" });
+      }
+    });
+
+    // Get Specific User's Deliveries (এই রাউটটি ঠিক করা হয়েছে)
     app.get("/deliveries/user/:email", async (req, res) => {
       try {
         const email = req.params.email;
@@ -324,6 +338,13 @@ run().catch(console.dir);
         res.status(500).send({ success: false, error: "Failed to fetch deliveries" });
       }
     });
+
+    console.log("Pinged your deployment. You successfully connected to MongoDB!");
+  } finally {
+  }
+}
+
+run().catch(console.dir);
 
 // ==========================================
 // Root Route
