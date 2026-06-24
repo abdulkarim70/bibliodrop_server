@@ -310,6 +310,21 @@ async function run() {
 
 run().catch(console.dir);
 
+
+// ==========================================
+    // Get Specific User's Deliveries
+    // ==========================================
+    app.get("/deliveries/user/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        const deliveries = await deliveriesCollection.find({ userEmail: email }).toArray();
+        res.send({ success: true, data: deliveries });
+      } catch (error) {
+        console.error("Error fetching user deliveries:", error);
+        res.status(500).send({ success: false, error: "Failed to fetch deliveries" });
+      }
+    });
+
 // ==========================================
 // Root Route
 // ==========================================
