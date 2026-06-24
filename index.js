@@ -4,6 +4,8 @@ require("dotenv").config();
 
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY); //stripe
+
 const app = express();
 const port = process.env.PORT || 5000;
 
@@ -196,6 +198,59 @@ async function run() {
       } catch (error) {
         console.error("Error updating status:", error);
         res.status(500).send({ success: false, error: "Failed to update status" });
+      }
+    });
+
+
+    // ==========================================
+    // Stripe Payment Intent API
+    // ==========================================
+    app.post("/create-payment-intent", async (req, res) => {
+      try {
+        const { deliveryFee } = req.body;
+        
+        // Stripe টাকার হিসাব সেন্ট (cents/পয়সা) এ করে। তাই ডলারকে 100 দিয়ে গুণ করতে হবে।
+        const amount = parseInt(deliveryFee * 100);
+
+        // Payment Intent তৈরি করা
+        const paymentIntent = await stripe.paymentIntents.create({
+          amount: amount,
+          currency: "usd",
+          payment_method_types: ["card"],
+        });
+
+        res.send({
+          success: true,
+          clientSecret: paymentIntent.client_secret,
+        });
+      } catch (error) {
+        console.error("Stripe Intent Error:", error);
+        res.status(500).send({ success: false, error: "Payment failed to initialize" });
+      }
+    });
+
+    // ==========================================
+    // Save Delivery Record API
+    // ==========================================
+    app.post("/deliveries", async (req, res) => {
+      try {
+        const deliveryData = req.body;
+        
+        // deliveries কালেকশনে ডেটা সেভ করা
+        const result = await deliveriesCollection.insertOne({
+          ...deliveryData,
+          status: "Pending Delivery", // প্রাথমিক স্ট্যাটাস
+          createdAt: new Date()
+        });
+
+        // একইসাথে বইয়ের স্ট্যাটাস আপডেট করে "Checked Out" করে দেওয়া
+        const filter = { _id: new ObjectId(deliveryData.bookId) };
+        const updateDoc = { $set: { status: "Checked Out" } };
+        await booksCollection.updateOne(filter, updateDoc);
+
+        res.send({ success: true, result });
+      } catch (error) {
+        res.status(500).send({ success: false, error: "Failed to save delivery record" });
       }
     });
 
