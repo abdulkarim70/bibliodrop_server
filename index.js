@@ -1,7 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
-// ১. ObjectId ইমপোর্ট করা হলো
+
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 
 const app = express();
@@ -40,7 +40,7 @@ async function run() {
     const deliveriesCollection = db.collection("deliveries");
 
     // ==========================================
-    // Books APIs (সবগুলো API এই ফাংশনের ভেতরে থাকবে)
+    
     // ==========================================
 
     // Add Book
@@ -141,7 +141,6 @@ async function run() {
       }
     });
 
-    // ২. Pending Books API (এটি উপরে রাখা হলো)
     app.get("/books/admin/pending", async (req, res) => {
       try {
         const pendingBooks = await booksCollection.find({ status: "Pending Approval" }).toArray();
@@ -206,7 +205,7 @@ async function run() {
 
 run().catch(console.dir);
 
-// Root Route (এটি run ফাংশনের বাইরেই থাকবে)
+
 app.get("/", (req, res) => {
   res.send("BiblioDrop Server is running!");
 });
