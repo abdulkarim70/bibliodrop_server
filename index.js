@@ -37,7 +37,7 @@ async function run() {
     const db = client.db("bibliodrop");
 
     const booksCollection = db.collection("books");
-    const usersCollection = db.collection("users");
+    const usersCollection = db.collection("user");
     const deliveriesCollection = db.collection("deliveries");
 
     // ==========================================
@@ -336,6 +336,138 @@ async function run() {
       } catch (error) {
         console.error("Error fetching user deliveries:", error);
         res.status(500).send({ success: false, error: "Failed to fetch deliveries" });
+      }
+    });
+    // ==========================================
+    // Get Specific Librarian's Deliveries
+    // ==========================================
+    app.get("/deliveries/librarian/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        const deliveries = await deliveriesCollection.find({ librarianEmail: email }).toArray();
+        res.send({ success: true, data: deliveries });
+      } catch (error) {
+        console.error("Error fetching librarian deliveries:", error);
+        res.status(500).send({ success: false, error: "Failed to fetch librarian deliveries" });
+      }
+    });
+
+    // Update Delivery Status (Librarian marking as delivered)
+    app.patch("/deliveries/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const { status } = req.body;
+        
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: { status: status },
+        };
+
+        const result = await deliveriesCollection.updateOne(filter, updateDoc);
+
+        res.send({
+          success: true,
+          message: "Delivery status updated successfully!",
+          data: result,
+        });
+      } catch (error) {
+        console.error("Error updating delivery:", error);
+        res.status(500).send({ success: false, error: "Failed to update delivery status" });
+      }
+    });
+
+    // ==========================================
+    // Admin Analytics & Stats API
+    // ==========================================
+    app.get("/admin/stats", async (req, res) => {
+      try {
+        // ১. টোটাল ইউজার কাউন্ট
+        const totalUsers = await usersCollection.countDocuments();
+        
+        // ২. টোটাল বই এবং ক্যাটাগরি হিসাব
+        const books = await booksCollection.find().toArray();
+        const totalBooks = books.length;
+
+        const categoryCount = {};
+        books.forEach((book) => {
+          const cat = book.category || "General";
+          categoryCount[cat] = (categoryCount[cat] || 0) + 1;
+        });
+
+        const chartData = Object.keys(categoryCount).map((key) => ({
+          name: key,
+          value: categoryCount[key],
+        }));
+
+// ==========================================
+    // Admin APIs: Manage Users
+    // ==========================================
+    
+    // ১. সব ইউজারদের তালিকা আনা
+    app.get("/admin/users", async (req, res) => {
+      try {
+        const users = await db.collection("user").find().toArray();
+        res.send({ success: true, data: users });
+      } catch (error) {
+        console.error("Error fetching users:", error);
+        res.status(500).send({ success: false, error: "Failed to fetch users" });
+      }
+    });
+
+    // ২. ইউজারের রোল আপডেট করা
+    app.patch("/admin/users/role/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const { role } = req.body;
+        
+        // Better Auth মাঝে মাঝে String ID ব্যবহার করে, তাই ObjectId এবং String দুটোর জন্যই চেক রাখা হলো
+        const filter = { _id: id.length === 24 ? new ObjectId(id) : id };
+        const updateDoc = { $set: { role: role } };
+        
+        const result = await db.collection("user").updateOne(filter, updateDoc);
+        res.send({ success: true, message: "Role updated successfully", data: result });
+      } catch (error) {
+        console.error("Error updating role:", error);
+        res.status(500).send({ success: false, error: "Failed to update role" });
+      }
+    });
+
+    // ৩. ইউজার ডিলিট করা
+    app.delete("/admin/users/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const filter = { _id: id.length === 24 ? new ObjectId(id) : id };
+        
+        const result = await db.collection("user").deleteOne(filter);
+        res.send({ success: true, message: "User deleted successfully", data: result });
+      } catch (error) {
+        console.error("Error deleting user:", error);
+        res.status(500).send({ success: false, error: "Failed to delete user" });
+      }
+    });
+
+        // ৩. টোটাল ডেলিভারি এবং রেভিনিউ হিসাব
+        const deliveries = await deliveriesCollection.find().toArray();
+        const totalDeliveries = deliveries.length;
+
+        let totalRevenue = 0;
+        deliveries.forEach(del => {
+          if (del.fee) totalRevenue += del.fee;
+        });
+
+        res.send({
+          success: true,
+          data: {
+            totalUsers,
+            totalBooks,
+            totalDeliveries,
+            totalRevenue,
+            chartData
+          }
+        });
+      } catch (error) {
+        console.error("Error fetching admin stats:", error);
+        res.status(500).send({ success: false, error: "Failed to fetch stats" });
       }
     });
 
