@@ -69,18 +69,59 @@ async function run() {
       }
     });
 
-    // 2. Get Published Books (With Pagination)
+    // 2. Get Books (With Search, Filter & Pagination)
     app.get("/books", async (req, res) => {
       try {
         const page = parseInt(req.query.page) || 0;
-        const size = parseInt(req.query.size) || 6;
+        const size = parseInt(req.query.size) || 8; // প্রতি পেজে ৮টি করে বই
 
-        const query = { status: "Published" };
+        // ফ্রন্টএন্ড থেকে আসা কোয়েরি প্যারামিটারগুলো গ্রহণ করা
+        const search = req.query.search;
+        const category = req.query.category;
+        const minFee = req.query.minFee;
+        const maxFee = req.query.maxFee;
+        const availability = req.query.availability;
+
+        // ডিফল্ট কুয়েরি: শুধুমাত্র Approved (Published বা Checked Out) বইগুলো দেখাবে
+        let query = { status: { $in: ["Published", "Checked Out"] } };
+
+        // ১. Search by Name (বইয়ের নাম দিয়ে খোঁজা)
+        if (search) {
+          query.title = { $regex: search, $options: "i" }; // 'i' মানে Case Insensitive
+        }
+
+        // ২. Filter by Category
+        if (category && category !== "All") {
+          query.category = category;
+        }
+
+        // ৩. Filter by Availability (যেমন: Available নাকি Checked Out)
+        if (availability && availability !== "All") {
+          query.status = availability === "Available" ? "Published" : "Checked Out";
+        }
+
+        // ৪. Filter by Delivery Fee Range
+        if (minFee || maxFee) {
+          query.deliveryFee = {};
+          if (minFee) query.deliveryFee.$gte = parseFloat(minFee);
+          if (maxFee) query.deliveryFee.$lte = parseFloat(maxFee);
+        }
+
         const totalBooks = await booksCollection.countDocuments(query);
-        const books = await booksCollection.find(query).skip(page * size).limit(size).toArray();
 
-        res.send({ success: true, totalBooks, data: books });
+        const books = await booksCollection
+          .find(query)
+          .skip(page * size)
+          .limit(size)
+          .toArray();
+
+        res.send({
+          success: true,
+          totalBooks, 
+          data: books,
+        });
       } catch (error) {
+        console.error("Error fetching books:", error);
         res.status(500).send({ success: false, error: "Failed to fetch books" });
       }
     });
@@ -95,50 +136,6 @@ async function run() {
         res.status(500).send({ success: false, error: "Failed to fetch librarian books" });
       }
     });
-
-// ==========================================
-    // Admin APIs: View All Transactions (Updated with $lookup)
-    // ==========================================
-    app.get("/admin/transactions", async (req, res) => {
-      try {
-        // $lookup ব্যবহার করে deliveries কালেকশনের সাথে user কালেকশন জয়েন করা হয়েছে
-        const transactions = await deliveriesCollection.aggregate([
-          {
-            $lookup: {
-              from: "user",           // user কালেকশন থেকে ডাটা খুঁজবে
-              localField: "userEmail", // deliveries কালেকশনের ইমেইল ফিল্ড
-              foreignField: "email",   // user কালেকশনের ইমেইল ফিল্ড
-              as: "userDetails"        // সাময়িকভাবে এই নামে ডাটা রাখবে
-            }
-          },
-          {
-            $addFields: {
-              // যদি আগে থেকে userName থাকে তবে সেটাই থাকবে, না থাকলে user কালেকশন থেকে name এনে বসাবে
-              userName: {
-                $ifNull: [
-                  "$userName",
-                  { $arrayElemAt: ["$userDetails.name", 0] }
-                ]
-              }
-            }
-          },
-          {
-            // অতিরিক্ত ফিল্ডটি বাদ দিয়ে ফ্রন্টএন্ডে পাঠানো হচ্ছে
-            $project: {
-              userDetails: 0
-            }
-          }
-        ]).toArray();
-
-        res.send({ success: true, data: transactions });
-      } catch (error) {
-        console.error("Error fetching all transactions:", error);
-        res.status(500).send({ success: false, error: "Failed to fetch transactions" });
-      }
-    });
-
-
-
 
     // 4. Get All Books (Admin)
     app.get("/books/admin/all", async (req, res) => {
@@ -343,7 +340,45 @@ async function run() {
     });
 
     // ==========================================
-    // Admin Analytics & Stats API (মাসিক আয়ের হিসাব সহ)
+    // Admin APIs: View All Transactions (Updated with $lookup)
+    // ==========================================
+    app.get("/admin/transactions", async (req, res) => {
+      try {
+        const transactions = await deliveriesCollection.aggregate([
+          {
+            $lookup: {
+              from: "user",           
+              localField: "userEmail", 
+              foreignField: "email",   
+              as: "userDetails"        
+            }
+          },
+          {
+            $addFields: {
+              userName: {
+                $ifNull: [
+                  "$userName",
+                  { $arrayElemAt: ["$userDetails.name", 0] }
+                ]
+              }
+            }
+          },
+          {
+            $project: {
+              userDetails: 0
+            }
+          }
+        ]).toArray();
+
+        res.send({ success: true, data: transactions });
+      } catch (error) {
+        console.error("Error fetching all transactions:", error);
+        res.status(500).send({ success: false, error: "Failed to fetch transactions" });
+      }
+    });
+
+    // ==========================================
+    // Admin Analytics & Stats API (মাসিক আয়ের হিসাব সহ)
     // ==========================================
     app.get("/admin/stats", async (req, res) => {
       try {
