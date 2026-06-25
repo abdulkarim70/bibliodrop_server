@@ -39,6 +39,7 @@ async function run() {
     const booksCollection = db.collection("books");
     const usersCollection = db.collection("user");
     const deliveriesCollection = db.collection("deliveries");
+    const reviewsCollection = db.collection("reviews"); // রিভিউ এর জন্য ভেরিয়েবল যোগ করা হলো
 
     // ==========================================
     // Books APIs
@@ -48,7 +49,6 @@ async function run() {
     app.post("/books", async (req, res) => {
       try {
         const bookData = req.body;
-        console.log("Frontend থেকে এই ডাটা এসেছে: ", bookData);
         
         const newBook = {
           ...bookData,
@@ -65,10 +65,7 @@ async function run() {
         });
       } catch (error) {
         console.error("Error adding book:", error);
-        res.status(500).send({
-          success: false,
-          error: "Failed to add book",
-        });
+        res.status(500).send({ success: false, error: "Failed to add book" });
       }
     });
 
@@ -79,26 +76,12 @@ async function run() {
         const size = parseInt(req.query.size) || 6;
 
         const query = { status: "Published" };
-
         const totalBooks = await booksCollection.countDocuments(query);
+        const books = await booksCollection.find(query).skip(page * size).limit(size).toArray();
 
-        const books = await booksCollection
-          .find(query)
-          .skip(page * size)
-          .limit(size)
-          .toArray();
-
-        res.send({
-          success: true,
-          totalBooks, 
-          data: books,
-        });
+        res.send({ success: true, totalBooks, data: books });
       } catch (error) {
-        console.error("Error fetching books:", error);
-        res.status(500).send({
-          success: false,
-          error: "Failed to fetch books",
-        });
+        res.status(500).send({ success: false, error: "Failed to fetch books" });
       }
     });
 
@@ -106,39 +89,64 @@ async function run() {
     app.get("/books/librarian/:email", async (req, res) => {
       try {
         const email = req.params.email;
-
-        const books = await booksCollection
-          .find({ librarianEmail: email })
-          .toArray();
-
-        res.send({
-          success: true,
-          data: books,
-        });
+        const books = await booksCollection.find({ librarianEmail: email }).toArray();
+        res.send({ success: true, data: books });
       } catch (error) {
-        console.error("Error fetching librarian books:", error);
-        res.status(500).send({
-          success: false,
-          error: "Failed to fetch librarian books",
-        });
+        res.status(500).send({ success: false, error: "Failed to fetch librarian books" });
       }
     });
+
+// ==========================================
+    // Admin APIs: View All Transactions (Updated with $lookup)
+    // ==========================================
+    app.get("/admin/transactions", async (req, res) => {
+      try {
+        // $lookup ব্যবহার করে deliveries কালেকশনের সাথে user কালেকশন জয়েন করা হয়েছে
+        const transactions = await deliveriesCollection.aggregate([
+          {
+            $lookup: {
+              from: "user",           // user কালেকশন থেকে ডাটা খুঁজবে
+              localField: "userEmail", // deliveries কালেকশনের ইমেইল ফিল্ড
+              foreignField: "email",   // user কালেকশনের ইমেইল ফিল্ড
+              as: "userDetails"        // সাময়িকভাবে এই নামে ডাটা রাখবে
+            }
+          },
+          {
+            $addFields: {
+              // যদি আগে থেকে userName থাকে তবে সেটাই থাকবে, না থাকলে user কালেকশন থেকে name এনে বসাবে
+              userName: {
+                $ifNull: [
+                  "$userName",
+                  { $arrayElemAt: ["$userDetails.name", 0] }
+                ]
+              }
+            }
+          },
+          {
+            // অতিরিক্ত ফিল্ডটি বাদ দিয়ে ফ্রন্টএন্ডে পাঠানো হচ্ছে
+            $project: {
+              userDetails: 0
+            }
+          }
+        ]).toArray();
+
+        res.send({ success: true, data: transactions });
+      } catch (error) {
+        console.error("Error fetching all transactions:", error);
+        res.status(500).send({ success: false, error: "Failed to fetch transactions" });
+      }
+    });
+
+
+
 
     // 4. Get All Books (Admin)
     app.get("/books/admin/all", async (req, res) => {
       try {
         const books = await booksCollection.find().toArray();
-
-        res.send({
-          success: true,
-          data: books,
-        });
+        res.send({ success: true, data: books });
       } catch (error) {
-        console.error("Error fetching all books:", error);
-        res.status(500).send({
-          success: false,
-          error: "Failed to fetch all books",
-        });
+        res.status(500).send({ success: false, error: "Failed to fetch all books" });
       }
     });
 
@@ -162,17 +170,9 @@ async function run() {
         if (!book) {
           return res.status(404).send({ success: false, message: "Book not found" });
         }
-
-        res.send({
-          success: true,
-          data: book,
-        });
+        res.send({ success: true, data: book });
       } catch (error) {
-        console.error("Error fetching single book:", error);
-        res.status(500).send({
-          success: false,
-          error: "Failed to fetch book",
-        });
+        res.status(500).send({ success: false, error: "Failed to fetch book" });
       }
     });
 
@@ -183,19 +183,11 @@ async function run() {
         const { status } = req.body; 
 
         const filter = { _id: new ObjectId(id) };
-        const updateDoc = {
-          $set: { status: status },
-        };
+        const updateDoc = { $set: { status: status } };
 
         const result = await booksCollection.updateOne(filter, updateDoc);
-
-        res.send({
-          success: true,
-          message: `Book status updated to ${status}`,
-          data: result,
-        });
+        res.send({ success: true, message: `Book status updated to ${status}`, data: result });
       } catch (error) {
-        console.error("Error updating status:", error);
         res.status(500).send({ success: false, error: "Failed to update status" });
       }
     });
@@ -219,14 +211,8 @@ async function run() {
         };
 
         const result = await booksCollection.updateOne(filter, updateDoc);
-
-        res.send({
-          success: true,
-          message: "Book updated successfully!",
-          data: result,
-        });
+        res.send({ success: true, message: "Book updated successfully!", data: result });
       } catch (error) {
-        console.error("Error updating book:", error);
         res.status(500).send({ success: false, error: "Failed to update book details" });
       }
     });
@@ -237,14 +223,8 @@ async function run() {
         const id = req.params.id;
         const query = { _id: new ObjectId(id) };
         const result = await booksCollection.deleteOne(query);
-
-        res.send({
-          success: true,
-          message: "Book deleted successfully!",
-          data: result,
-        });
+        res.send({ success: true, message: "Book deleted successfully!", data: result });
       } catch (error) {
-        console.error("Error deleting book:", error);
         res.status(500).send({ success: false, error: "Failed to delete book" });
       }
     });
@@ -263,10 +243,7 @@ async function run() {
           payment_method_types: ["card"],
         });
 
-        res.send({
-          success: true,
-          clientSecret: paymentIntent.client_secret,
-        });
+        res.send({ success: true, clientSecret: paymentIntent.client_secret });
       } catch (error) {
         console.error("Stripe Intent Error:", error);
         res.status(500).send({ success: false, error: "Payment failed to initialize" });
@@ -297,57 +274,25 @@ async function run() {
         res.status(500).send({ success: false, error: "Failed to save delivery record" });
       }
     });
-    // ==========================================
-    // Reviews APIs
-    // ==========================================
 
-    // ১. নির্দিষ্ট কোনো বইয়ের জন্য রিভিউ পোস্ট করা
-    app.post("/reviews", async (req, res) => {
-      try {
-        const reviewData = req.body;
-        const result = await db.collection("reviews").insertOne({
-          ...reviewData,
-          createdAt: new Date()
-        });
-        res.status(201).send({ success: true, data: result });
-      } catch (error) {
-        res.status(500).send({ success: false, error: "Failed to add review" });
-      }
-    });
-
-    // ২. নির্দিষ্ট ইউজারের দেওয়া সমস্ত রিভিউ তুলে আনা (My Reviews এর জন্য)
-    app.get("/reviews/user/:email", async (req, res) => {
-      try {
-        const email = req.params.email;
-        const reviews = await db.collection("reviews").find({ userEmail: email }).toArray();
-        res.send({ success: true, data: reviews });
-      } catch (error) {
-        console.error("Error fetching user reviews:", error);
-        res.status(500).send({ success: false, error: "Failed to fetch reviews" });
-      }
-    });
-
-    // Get Specific User's Deliveries (এই রাউটটি ঠিক করা হয়েছে)
+    // Get Specific User's Deliveries
     app.get("/deliveries/user/:email", async (req, res) => {
       try {
         const email = req.params.email;
         const deliveries = await deliveriesCollection.find({ userEmail: email }).toArray();
         res.send({ success: true, data: deliveries });
       } catch (error) {
-        console.error("Error fetching user deliveries:", error);
-        res.status(500).send({ success: false, error: "Failed to fetch deliveries" });
+        res.status(500).send({ success: false, error: "Failed to fetch user deliveries" });
       }
     });
-    // ==========================================
+
     // Get Specific Librarian's Deliveries
-    // ==========================================
     app.get("/deliveries/librarian/:email", async (req, res) => {
       try {
         const email = req.params.email;
         const deliveries = await deliveriesCollection.find({ librarianEmail: email }).toArray();
         res.send({ success: true, data: deliveries });
       } catch (error) {
-        console.error("Error fetching librarian deliveries:", error);
         res.status(500).send({ success: false, error: "Failed to fetch librarian deliveries" });
       }
     });
@@ -359,32 +304,51 @@ async function run() {
         const { status } = req.body;
         
         const filter = { _id: new ObjectId(id) };
-        const updateDoc = {
-          $set: { status: status },
-        };
+        const updateDoc = { $set: { status: status } };
 
         const result = await deliveriesCollection.updateOne(filter, updateDoc);
-
-        res.send({
-          success: true,
-          message: "Delivery status updated successfully!",
-          data: result,
-        });
+        res.send({ success: true, message: "Delivery status updated successfully!", data: result });
       } catch (error) {
-        console.error("Error updating delivery:", error);
         res.status(500).send({ success: false, error: "Failed to update delivery status" });
       }
     });
 
     // ==========================================
-    // Admin Analytics & Stats API
+    // Reviews APIs
+    // ==========================================
+
+    // ১. নির্দিষ্ট কোনো বইয়ের জন্য রিভিউ পোস্ট করা
+    app.post("/reviews", async (req, res) => {
+      try {
+        const reviewData = req.body;
+        const result = await reviewsCollection.insertOne({
+          ...reviewData,
+          createdAt: new Date()
+        });
+        res.status(201).send({ success: true, data: result });
+      } catch (error) {
+        res.status(500).send({ success: false, error: "Failed to add review" });
+      }
+    });
+
+    // ২. নির্দিষ্ট ইউজারের দেওয়া সমস্ত রিভিউ তুলে আনা
+    app.get("/reviews/user/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        const reviews = await reviewsCollection.find({ userEmail: email }).toArray();
+        res.send({ success: true, data: reviews });
+      } catch (error) {
+        res.status(500).send({ success: false, error: "Failed to fetch reviews" });
+      }
+    });
+
+    // ==========================================
+    // Admin Analytics & Stats API (মাসিক আয়ের হিসাব সহ)
     // ==========================================
     app.get("/admin/stats", async (req, res) => {
       try {
-        // ১. টোটাল ইউজার কাউন্ট
         const totalUsers = await usersCollection.countDocuments();
         
-        // ২. টোটাল বই এবং ক্যাটাগরি হিসাব
         const books = await booksCollection.find().toArray();
         const totalBooks = books.length;
 
@@ -399,17 +363,56 @@ async function run() {
           value: categoryCount[key],
         }));
 
-// ==========================================
+        const deliveries = await deliveriesCollection.find().toArray();
+        const totalDeliveries = deliveries.length;
+
+        let totalRevenue = 0;
+        const monthlyRevenueMap = {};
+
+        deliveries.forEach(del => {
+          if (del.fee) {
+            totalRevenue += del.fee;
+            
+            const dateObj = new Date(del.createdAt || del.date);
+            if (!isNaN(dateObj)) {
+              const monthName = dateObj.toLocaleString("en-US", { month: "short", year: "numeric" });
+              monthlyRevenueMap[monthName] = (monthlyRevenueMap[monthName] || 0) + del.fee;
+            }
+          }
+        });
+
+        const monthlyRevenueData = Object.keys(monthlyRevenueMap).map(key => ({
+          name: key,
+          revenue: monthlyRevenueMap[key]
+        }));
+
+        res.send({
+          success: true,
+          data: {
+            totalUsers,
+            totalBooks,
+            totalDeliveries,
+            totalRevenue,
+            chartData,
+            monthlyRevenueData
+          }
+        });
+      } catch (error) {
+        console.error("Error fetching admin stats:", error);
+        res.status(500).send({ success: false, error: "Failed to fetch stats" });
+      }
+    });
+
+    // ==========================================
     // Admin APIs: Manage Users
     // ==========================================
     
     // ১. সব ইউজারদের তালিকা আনা
     app.get("/admin/users", async (req, res) => {
       try {
-        const users = await db.collection("user").find().toArray();
+        const users = await usersCollection.find().toArray();
         res.send({ success: true, data: users });
       } catch (error) {
-        console.error("Error fetching users:", error);
         res.status(500).send({ success: false, error: "Failed to fetch users" });
       }
     });
@@ -420,14 +423,12 @@ async function run() {
         const id = req.params.id;
         const { role } = req.body;
         
-        // Better Auth মাঝে মাঝে String ID ব্যবহার করে, তাই ObjectId এবং String দুটোর জন্যই চেক রাখা হলো
         const filter = { _id: id.length === 24 ? new ObjectId(id) : id };
         const updateDoc = { $set: { role: role } };
         
-        const result = await db.collection("user").updateOne(filter, updateDoc);
+        const result = await usersCollection.updateOne(filter, updateDoc);
         res.send({ success: true, message: "Role updated successfully", data: result });
       } catch (error) {
-        console.error("Error updating role:", error);
         res.status(500).send({ success: false, error: "Failed to update role" });
       }
     });
@@ -438,36 +439,10 @@ async function run() {
         const id = req.params.id;
         const filter = { _id: id.length === 24 ? new ObjectId(id) : id };
         
-        const result = await db.collection("user").deleteOne(filter);
+        const result = await usersCollection.deleteOne(filter);
         res.send({ success: true, message: "User deleted successfully", data: result });
       } catch (error) {
-        console.error("Error deleting user:", error);
         res.status(500).send({ success: false, error: "Failed to delete user" });
-      }
-    });
-
-        // ৩. টোটাল ডেলিভারি এবং রেভিনিউ হিসাব
-        const deliveries = await deliveriesCollection.find().toArray();
-        const totalDeliveries = deliveries.length;
-
-        let totalRevenue = 0;
-        deliveries.forEach(del => {
-          if (del.fee) totalRevenue += del.fee;
-        });
-
-        res.send({
-          success: true,
-          data: {
-            totalUsers,
-            totalBooks,
-            totalDeliveries,
-            totalRevenue,
-            chartData
-          }
-        });
-      } catch (error) {
-        console.error("Error fetching admin stats:", error);
-        res.status(500).send({ success: false, error: "Failed to fetch stats" });
       }
     });
 
